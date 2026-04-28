@@ -1,0 +1,197 @@
+ 
+import numpy as np
+from fitness import fitness, evaluate_baseline, DEFAULT_TAU, PENALTY_WEIGHT
+ 
+POP_SIZE        = 60      
+N_GENERATIONS   = 200     
+ELITE_FRACTION  = 0.10    
+MUTATION_RATE   = 0.25    
+MUTATION_SIGMA  = 3.0                     
+TOURNAMENT_SIZE = 4        
+ 
+LAB_MIN = np.array([  0.0, -128.0, -128.0])
+LAB_MAX = np.array([100.0,  127.0,  127.0])
+
+
+def init_population(original_lab, pop_size=POP_SIZE, sigma=MUTATION_SIGMA):
+    
+    k = len(original_lab)
+    population = []
+ 
+    population.append(original_lab.copy())
+ 
+    for _ in range(pop_size - 1):
+        noise = np.random.normal(0, sigma, size=(k, 3))
+        candidate = np.clip(original_lab + noise, LAB_MIN, LAB_MAX)
+        population.append(candidate)
+ 
+    return population
+
+def tournament_select(population, scores, tournament_size=TOURNAMENT_SIZE):
+
+    indices = np.random.choice(len(population), size=tournament_size, replace=False)
+    best_idx = indices[np.argmax([scores[i] for i in indices])]
+    return population[best_idx].copy()
+ 
+ 
+def crossover(parent_a, parent_b):
+
+    k = len(parent_a)
+    mask = np.random.rand(k) < 0.5          # True = take from parent_a
+    child = np.where(mask[:, None], parent_a, parent_b)
+    return child
+ 
+def mutate(individual, original_lab, mutation_rate=MUTATION_RATE,
+           sigma=MUTATION_SIGMA, tau=DEFAULT_TAU):
+
+    mutated = individual.copy()
+    k = len(mutated)
+ 
+    for i in range(k):
+        if np.random.rand() < mutation_rate:
+            noise = np.random.normal(0, sigma, size=3)
+            new_colour = np.clip(mutated[i] + noise, LAB_MIN, LAB_MAX)
+ 
+            # Check drift from original — if it exceeds tau, scale it back
+            from cvd_module import delta_e
+            drift = delta_e(original_lab[i], new_colour)
+            if drift > tau:
+                # Interpolate back toward original until drift = tau
+                t = tau / drift          # 0 < t < 1
+                new_colour = original_lab[i] + t * (new_colour - original_lab[i])
+                new_colour = np.clip(new_colour, LAB_MIN, LAB_MAX)
+ 
+            mutated[i] = new_colour
+ 
+    return mutated
+ 
+def run_ga(original_lab,
+           cvd_types=None,
+           pop_size=POP_SIZE,
+           n_generations=N_GENERATIONS,
+           elite_fraction=ELITE_FRACTION,
+           mutation_rate=MUTATION_RATE,
+           mutation_sigma=MUTATION_SIGMA,
+           tau=DEFAULT_TAU,
+           verbose=True):
+    
+    if cvd_types is None:
+        cvd_types = ["protan", "deutan", "tritan"]
+ 
+    k = len(original_lab)
+    n_elite = max(1, int(pop_size * elite_fraction))
+ 
+    # ── Print baseline so you can see how much improvement you get ──
+    if verbose:
+        print("\n" + "=" * 55)
+        print("  GENETIC ALGORITHM — Colour Palette Optimisation")
+        print("=" * 55)
+        print(f"  Palette size : {k} colours")
+        print(f"  Population   : {pop_size}")
+        print(f"  Generations  : {n_generations}")
+        print(f"  CVD types    : {cvd_types}")
+        print(f"  Fidelity τ   : {tau} ΔE units")
+        print("=" * 55 + "\n")
+        evaluate_baseline(original_lab, cvd_types=cvd_types)
+        print()
+ 
+    # ── Step 1: Initialise population ──
+    population = init_population(original_lab, pop_size=pop_size,
+                                  sigma=mutation_sigma)
+ 
+    history = []        # best fitness per generation
+    best_score = -np.inf
+    best_palette = original_lab.copy()
+ 
+    for gen in range(n_generations):
+ 
+        # ── Step 2: Evaluate fitness of every individual ──
+        scores = [
+            fitness(ind, original_lab, cvd_types=cvd_types,
+                    tau=tau, penalty_weight=PENALTY_WEIGHT)
+            for ind in population
+        ]
+ 
+        # Track global best
+        gen_best_idx = int(np.argmax(scores))
+        gen_best_score = scores[gen_best_idx]
+ 
+        if gen_best_score > best_score:
+            best_score = gen_best_score
+            best_palette = population[gen_best_idx].copy()
+ 
+        history.append(best_score)
+ 
+        if verbose and (gen % 20 == 0 or gen == n_generations - 1):
+            print(f"  Gen {gen:>4d}/{n_generations}  |  "
+                  f"Best fitness = {best_score:7.3f}  |  "
+                  f"Pop best = {gen_best_score:7.3f}")
+ 
+        # ── Step 3: Build next generation ──
+        # Sort population by score (best first)
+        sorted_pairs = sorted(zip(scores, range(pop_size)), reverse=True)
+        sorted_indices = [idx for _, idx in sorted_pairs]
+ 
+        next_gen = []
+ 
+        # Elitism — copy top N directly, no changes
+        for idx in sorted_indices[:n_elite]:
+            next_gen.append(population[idx].copy())
+ 
+        # Fill the rest with crossover + mutation
+        while len(next_gen) < pop_size:
+            parent_a = tournament_select(population, scores)
+            parent_b = tournament_select(population, scores)
+ 
+            child = crossover(parent_a, parent_b)
+            child = mutate(child, original_lab,
+                           mutation_rate=mutation_rate,
+                           sigma=mutation_sigma,
+                           tau=tau)
+            next_gen.append(child)
+ 
+        population = next_gen
+ 
+    if verbose:
+        print(f"\n  ✓ Done. Best fitness = {best_score:.3f}\n")
+ 
+    return best_palette, history
+ 
+ 
+
+def report_result(original_lab, optimized_lab, cvd_types=None):
+
+    if cvd_types is None:
+        cvd_types = ["protan", "deutan", "tritan"]
+ 
+    from fitness import fitness
+    from cvd_module import delta_e
+ 
+    print("\n" + "=" * 55)
+    print("  RESULTS: Original vs Optimised Palette")
+    print("=" * 55)
+ 
+    orig_score, orig_details = fitness(
+        original_lab, original_lab, cvd_types=cvd_types, return_details=True)
+    opt_score, opt_details = fitness(
+        optimized_lab, original_lab, cvd_types=cvd_types, return_details=True)
+ 
+    print(f"\n  {'Metric':<30} {'Original':>10} {'Optimised':>10}")
+    print("  " + "-" * 52)
+    print(f"  {'Overall fitness':<30} {orig_score:>10.3f} {opt_score:>10.3f}")
+    print(f"  {'Feasible (no constraint violation)':<30} "
+          f"{'Yes' if orig_details['feasible'] else 'No':>10} "
+          f"{'Yes' if opt_details['feasible'] else 'No':>10}")
+ 
+    for cvd in cvd_types:
+        label = f"Min ΔE ({cvd})"
+        orig_de = orig_details["min_de_per_cvd"][cvd]
+        opt_de  = opt_details["min_de_per_cvd"][cvd]
+        print(f"  {label:<30} {orig_de:>10.3f} {opt_de:>10.3f}")
+ 
+    print(f"\n  Per-colour drift from original:")
+    for i, drift in enumerate(opt_details["drifts"]):
+        print(f"    Colour {i}: ΔE = {drift:.2f}")
+ 
+    print("=" * 55 + "\n")
+ 
