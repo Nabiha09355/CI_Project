@@ -3,11 +3,9 @@ visualize.py
 ============
 Shows a before/after comparison of the palette optimization.
  
-Produces a 2x2 grid:
-    TOP LEFT     — original palette (normal vision)
-    TOP RIGHT    — original palette (as deuteranope sees it)
-    BOTTOM LEFT  — optimized palette (normal vision)
-    BOTTOM RIGHT — optimized palette (as deuteranope sees it)
+Produces a 2-row grid:
+    ROW 1 — original palette: normal vision + each CVD simulation
+    ROW 2 — optimised palette: normal vision + each CVD simulation
  
 Also plots the GA convergence curve (fitness over generations).
 """
@@ -47,52 +45,65 @@ def draw_palette_row(ax, palette_rgb, title, subtitle=""):
 def show_palette_comparison(original_lab, optimized_lab,
                              cvd_type="deutan", save_path=None):
     """
-    Show the 2x2 before/after comparison grid.
+    Show the before/after comparison grid for all CVD types.
  
     Parameters
     ----------
     original_lab  : ndarray (k, 3) — original palette in CIELAB
     optimized_lab : ndarray (k, 3) — optimized palette in CIELAB
-    cvd_type      : str — which CVD to simulate for the right column
+    cvd_type      : str or list of str — CVD type(s) to simulate
     save_path     : str or None — if given, saves the figure to this path
     """
-    # Convert everything to RGB for display
-    orig_rgb     = lab_to_srgb(original_lab)
-    opt_rgb      = lab_to_srgb(optimized_lab)
-    orig_sim_lab = simulate_palette_lab(original_lab,  cvd_type=cvd_type)
-    opt_sim_lab  = simulate_palette_lab(optimized_lab, cvd_type=cvd_type)
-    orig_sim_rgb = lab_to_srgb(orig_sim_lab)
-    opt_sim_rgb  = lab_to_srgb(opt_sim_lab)
+    # Normalise to a list so the rest of the code is uniform
+    if isinstance(cvd_type, str):
+        cvd_types = [cvd_type]
+    else:
+        cvd_types = list(cvd_type)
  
-    cvd_label = {"deutan": "Deuteranopia", "protan": "Protanopia",
-                 "tritan": "Tritanopia"}.get(cvd_type, cvd_type)
+    cvd_labels = {"deutan": "Deuteranopia", "protan": "Protanopia",
+                  "tritan": "Tritanopia"}
  
-    fig, axes = plt.subplots(2, 2, figsize=(12, 5))
+    n_cvd = len(cvd_types)
+    n_cols = 1 + n_cvd          # first column = normal vision
+ 
+    orig_rgb = lab_to_srgb(original_lab)
+    opt_rgb  = lab_to_srgb(optimized_lab)
+ 
+    fig, axes = plt.subplots(2, n_cols, figsize=(4 * n_cols, 5))
+ 
+    # If only 1 CVD type, axes shape is (2, 2) — fine.
+    # If n_cols == 1 somehow, force 2D — but that can't happen (min 1 CVD + normal = 2 cols)
+    if axes.ndim == 1:
+        axes = axes.reshape(2, 1)
+ 
     fig.suptitle("Colour Palette Optimisation for CVD Accessibility",
                  fontsize=14, fontweight="bold", y=1.02)
  
+    # Column 0: normal vision
     draw_palette_row(axes[0, 0], orig_rgb,
                      "Original Palette", "Normal vision")
-    draw_palette_row(axes[0, 1], orig_sim_rgb,
-                     "Original Palette", f"As seen with {cvd_label}")
     draw_palette_row(axes[1, 0], opt_rgb,
                      "Optimised Palette", "Normal vision")
-    draw_palette_row(axes[1, 1], opt_sim_rgb,
-                     "Optimised Palette", f"As seen with {cvd_label}")
  
-    # Column labels
-    fig.text(0.28, 1.0, "Normal Vision",
-             ha="center", fontsize=12, color="#333333")
-    fig.text(0.72, 1.0, f"Simulated {cvd_label}",
-             ha="center", fontsize=12, color="#333333")
+    # Columns 1..n_cvd: one per CVD type
+    for col, cvd in enumerate(cvd_types, start=1):
+        label = cvd_labels.get(cvd, cvd)
+ 
+        orig_sim_rgb = lab_to_srgb(simulate_palette_lab(original_lab,  cvd_type=cvd))
+        opt_sim_rgb  = lab_to_srgb(simulate_palette_lab(optimized_lab, cvd_type=cvd))
+ 
+        draw_palette_row(axes[0, col], orig_sim_rgb,
+                         "Original Palette", f"As seen with {label}")
+        draw_palette_row(axes[1, col], opt_sim_rgb,
+                         "Optimised Palette", f"As seen with {label}")
  
     plt.tight_layout()
  
     if save_path:
         plt.savefig(save_path, dpi=150, bbox_inches="tight")
-        print(f"  Saved palette comparison → {save_path}")
- 
-    plt.show()
+        plt.close(fig)
+    else:
+        plt.show()
  
  
 def show_convergence(history, save_path=None):
@@ -123,6 +134,6 @@ def show_convergence(history, save_path=None):
  
     if save_path:
         plt.savefig(save_path, dpi=150, bbox_inches="tight")
-        print(f"  Saved convergence plot  → {save_path}")
- 
-    plt.show()
+        plt.close(fig)
+    else:
+        plt.show()

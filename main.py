@@ -80,7 +80,7 @@ OPTIONS
 -------
     --image     Path to input image (PNG, JPG, etc.)
     --colours   Number of palette colours to extract (default: 6)
-    --cvd       CVD type to optimise for: deutan / protan / tritan (default: deutan)
+    --cvd       CVD types to optimise for (default: all three — protan deutan tritan)
     --gens      Number of GA generations (default: 200)
     --pop       GA population size (default: 60)
     --save      Save output figures instead of just displaying them
@@ -118,9 +118,10 @@ def main():
                         help="Path to input image")
     parser.add_argument("--colours", type=int,   default=6,
                         help="Number of palette colours (default: 6)")
-    parser.add_argument("--cvd",     type=str,   default="deutan",
+    parser.add_argument("--cvd",     type=str,   nargs="+",
+                        default=["protan", "deutan", "tritan"],
                         choices=["deutan", "protan", "tritan"],
-                        help="CVD type to optimise for (default: deutan)")
+                        help="CVD types to optimise for (default: all three)")
     parser.add_argument("--gens",    type=int,   default=200,
                         help="GA generations (default: 200)")
     parser.add_argument("--pop",     type=int,   default=60,
@@ -153,22 +154,25 @@ def main():
             print(f"    [{i}] {hex_col}  LAB=({lab[0]:.1f}, {lab[1]:.1f}, {lab[2]:.1f})")
  
     # ── Step 2: Run the GA ────────────────────────────────────
-    print(f"\n  Optimising for: {args.cvd.upper()}  "
+    print(f"\n  Optimising for: {', '.join(c.upper() for c in args.cvd)}  "
           f"({args.gens} generations, population {args.pop})")
     print("  This will take 1–3 minutes...\n")
  
+    snapshot_dir = "snapshots" if args.save else None
+ 
     optimized_lab, history = run_ga(
         palette_lab,
-        cvd_types=[args.cvd],
+        cvd_types=args.cvd,
         pop_size=args.pop,
         n_generations=args.gens,
-        verbose=True
+        verbose=True,
+        snapshot_dir=snapshot_dir
     )
  
     optimized_rgb = lab_to_srgb(optimized_lab)
  
     # ── Step 3: Print results ─────────────────────────────────
-    report_result(palette_lab, optimized_lab, cvd_types=[args.cvd])
+    report_result(palette_lab, optimized_lab, cvd_types=args.cvd)
  
     print("  Optimised palette (RGB hex):")
     for i, rgb in enumerate(optimized_rgb):
@@ -193,4 +197,3 @@ def main():
  
 if __name__ == "__main__":
     main()
- 

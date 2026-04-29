@@ -1,4 +1,4 @@
- 
+import os
 import numpy as np
 from fitness import fitness, evaluate_baseline, DEFAULT_TAU, PENALTY_WEIGHT
  
@@ -73,7 +73,9 @@ def run_ga(original_lab,
            mutation_rate=MUTATION_RATE,
            mutation_sigma=MUTATION_SIGMA,
            tau=DEFAULT_TAU,
-           verbose=True):
+           verbose=True,
+           snapshot_dir=None,
+           snapshot_every=20):
     
     if cvd_types is None:
         cvd_types = ["protan", "deutan", "tritan"]
@@ -98,6 +100,11 @@ def run_ga(original_lab,
     # ── Step 1: Initialise population ──
     population = init_population(original_lab, pop_size=pop_size,
                                   sigma=mutation_sigma)
+ 
+    # ── Snapshot setup ──
+    if snapshot_dir is not None:
+        os.makedirs(snapshot_dir, exist_ok=True)
+        from visualize import show_palette_comparison
  
     history = []        # best fitness per generation
     best_score = -np.inf
@@ -126,6 +133,17 @@ def run_ga(original_lab,
             print(f"  Gen {gen:>4d}/{n_generations}  |  "
                   f"Best fitness = {best_score:7.3f}  |  "
                   f"Pop best = {gen_best_score:7.3f}")
+ 
+        # ── Save snapshot of best palette every N generations ──
+        if snapshot_dir is not None and (gen % snapshot_every == 0 or gen == n_generations - 1):
+            snap_path = os.path.join(snapshot_dir, f"gen{gen}.png")
+            show_palette_comparison(
+                original_lab, best_palette,
+                cvd_type=cvd_types,
+                save_path=snap_path
+            )
+            if verbose:
+                print(f"    → Snapshot saved: {snap_path}")
  
         # ── Step 3: Build next generation ──
         # Sort population by score (best first)
@@ -194,4 +212,3 @@ def report_result(original_lab, optimized_lab, cvd_types=None):
         print(f"    Colour {i}: ΔE = {drift:.2f}")
  
     print("=" * 55 + "\n")
- 
