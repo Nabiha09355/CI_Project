@@ -2,8 +2,8 @@ import os
 import numpy as np
 from fitness import fitness, evaluate_baseline, DEFAULT_TAU, PENALTY_WEIGHT
  
-POP_SIZE        = 60      
-N_GENERATIONS   = 200     
+POP_SIZE        = 100      
+N_GENERATIONS   = 100     
 ELITE_FRACTION  = 0.10    
 MUTATION_RATE   = 0.25    
 MUTATION_SIGMA  = 3.0                     

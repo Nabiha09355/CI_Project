@@ -93,8 +93,8 @@ import numpy as np
  
 from cvd_module import srgb_to_lab, lab_to_srgb
 from palette_extraction import extract_palette_from_path, print_palette
-from ga import run_ga, report_result
-from fitness import fitness
+from ga import run_ga, report_result, POP_SIZE, N_GENERATIONS
+from fitness import fitness, DEFAULT_TAU
 from visualize import show_palette_comparison, show_convergence
  
  
@@ -125,12 +125,12 @@ def main():
                         default=["protan", "deutan", "tritan"],
                         choices=["deutan", "protan", "tritan"],
                         help="CVD types to optimise for (default: all three)")
-    parser.add_argument("--gens",    type=int,   default=200,
-                        help="GA generations (default: 200)")
-    parser.add_argument("--pop",     type=int,   default=60,
-                        help="GA population size (default: 60)")
-    parser.add_argument("--tau",     type=float, default=15.0,
-                        help="Fidelity threshold in ΔE units (default: 15)")
+    parser.add_argument("--gens",    type=int,   default=N_GENERATIONS,
+                        help=f"GA generations (default: {N_GENERATIONS})")
+    parser.add_argument("--pop",     type=int,   default=POP_SIZE,
+                        help=f"GA population size (default: {POP_SIZE})")
+    parser.add_argument("--tau",     type=float, default=DEFAULT_TAU,
+                        help=f"Fidelity threshold in ΔE units (default: {DEFAULT_TAU})")
     parser.add_argument("--runs",    type=int,   default=1,
                         help="Number of independent GA runs (default: 1)")
     parser.add_argument("--save",    action="store_true",
