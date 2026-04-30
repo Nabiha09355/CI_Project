@@ -81,8 +81,10 @@ OPTIONS
     --image     Path to input image (PNG, JPG, etc.)
     --colours   Number of palette colours to extract (default: 6)
     --cvd       CVD types to optimise for (default: all three — protan deutan tritan)
+    --tau       Fidelity threshold in ΔE units (default: 15)
     --gens      Number of GA generations (default: 200)
     --pop       GA population size (default: 60)
+    --runs      Number of independent GA runs (default: 1)
     --save      Save output figures instead of just displaying them
 """
  
@@ -92,6 +94,7 @@ import numpy as np
 from cvd_module import srgb_to_lab, lab_to_srgb
 from palette_extraction import extract_palette_from_path, print_palette
 from ga import run_ga, report_result
+from fitness import fitness
 from visualize import show_palette_comparison, show_convergence
  
  
@@ -126,6 +129,10 @@ def main():
                         help="GA generations (default: 200)")
     parser.add_argument("--pop",     type=int,   default=60,
                         help="GA population size (default: 60)")
+    parser.add_argument("--tau",     type=float, default=15.0,
+                        help="Fidelity threshold in ΔE units (default: 15)")
+    parser.add_argument("--runs",    type=int,   default=1,
+                        help="Number of independent GA runs (default: 1)")
     parser.add_argument("--save",    action="store_true",
                         help="Save figures to disk instead of displaying")
     args = parser.parse_args()
@@ -154,45 +161,183 @@ def main():
             print(f"    [{i}] {hex_col}  LAB=({lab[0]:.1f}, {lab[1]:.1f}, {lab[2]:.1f})")
  
     # ── Step 2: Run the GA ────────────────────────────────────
-    print(f"\n  Optimising for: {', '.join(c.upper() for c in args.cvd)}  "
-          f"({args.gens} generations, population {args.pop})")
-    print("  This will take 1–3 minutes...\n")
+    print(f"\n  Optimising for: {', '.join(c.upper() for c in args.cvd)}")
+    print(f"  τ = {args.tau} ΔE  |  {args.gens} generations  |  population {args.pop}")
+    print(f"  Independent runs: {args.runs}")
+    if args.runs > 1:
+        print("  (Verbose output suppressed for multi-run mode)\n")
+    else:
+        print("  This will take 1–3 minutes...\n")
  
     snapshot_dir = "snapshots" if args.save else None
  
-    optimized_lab, history = run_ga(
-        palette_lab,
-        cvd_types=args.cvd,
-        pop_size=args.pop,
-        n_generations=args.gens,
-        verbose=True,
-        snapshot_dir=snapshot_dir
-    )
+    # ── Storage for multi-run statistics ──
+    all_scores = []
+    all_min_de_per_cvd = {cvd: [] for cvd in args.cvd}
+    all_max_drifts = []
+    all_mean_drifts = []
+    all_histories = []
+    all_feasible = []
  
+    best_overall_score = -np.inf
+    best_overall_palette = None
+    best_overall_history = None
+ 
+    for run in range(args.runs):
+        if args.runs > 1:
+            # Different random seed per run
+            np.random.seed(run * 42 + 7)
+ 
+        # Only save snapshots for the first run
+        run_snapshot_dir = snapshot_dir if run == 0 else None
+ 
+        optimized_lab, history = run_ga(
+            palette_lab,
+            cvd_types=args.cvd,
+            pop_size=args.pop,
+            n_generations=args.gens,
+            tau=args.tau,
+            verbose=(args.runs == 1),
+            snapshot_dir=run_snapshot_dir
+        )
+ 
+        # Evaluate this run
+        score, details = fitness(
+            optimized_lab, palette_lab,
+            cvd_types=args.cvd,
+            tau=args.tau,
+            return_details=True
+        )
+ 
+        # Collect statistics
+        all_scores.append(score)
+        for cvd in args.cvd:
+            all_min_de_per_cvd[cvd].append(details["min_de_per_cvd"][cvd])
+        all_max_drifts.append(float(np.max(details["drifts"])))
+        all_mean_drifts.append(float(np.mean(details["drifts"])))
+        all_histories.append(history)
+        all_feasible.append(details["feasible"])
+ 
+        # Track global best
+        if score > best_overall_score:
+            best_overall_score = score
+            best_overall_palette = optimized_lab.copy()
+            best_overall_history = history
+ 
+        if args.runs > 1:
+            print(f"  Run {run + 1:>3d}/{args.runs}  |  "
+                  f"fitness = {score:8.3f}  |  "
+                  f"max drift = {np.max(details['drifts']):6.2f}  |  "
+                  f"feasible = {'Yes' if details['feasible'] else 'No'}")
+ 
+    # ── Step 3: Results ───────────────────────────────────────
+    optimized_lab = best_overall_palette
     optimized_rgb = lab_to_srgb(optimized_lab)
  
-    # ── Step 3: Print results ─────────────────────────────────
-    report_result(palette_lab, optimized_lab, cvd_types=args.cvd)
+    if args.runs == 1:
+        # Single run — detailed report
+        report_result(palette_lab, optimized_lab, cvd_types=args.cvd)
+    else:
+        # Multi-run — statistical summary
+        scores = np.array(all_scores)
+        max_d = np.array(all_max_drifts)
+        mean_d = np.array(all_mean_drifts)
+        n_feasible = sum(all_feasible)
  
-    print("  Optimised palette (RGB hex):")
+        print("\n" + "=" * 70)
+        print(f"  STATISTICAL SUMMARY — {args.runs} independent runs  |  τ = {args.tau}")
+        print("=" * 70)
+ 
+        print(f"\n  {'Metric':<30} {'Mean':>8} {'Median':>8} {'Std':>8} {'Min':>8} {'Max':>8}")
+        print("  " + "-" * 72)
+ 
+        print(f"  {'Overall fitness':<30} {scores.mean():>8.3f} {np.median(scores):>8.3f} "
+              f"{scores.std():>8.3f} {scores.min():>8.3f} {scores.max():>8.3f}")
+ 
+        for cvd in args.cvd:
+            vals = np.array(all_min_de_per_cvd[cvd])
+            label = f"Min ΔE ({cvd})"
+            print(f"  {label:<30} {vals.mean():>8.3f} {np.median(vals):>8.3f} "
+                  f"{vals.std():>8.3f} {vals.min():>8.3f} {vals.max():>8.3f}")
+ 
+        print(f"  {'Max per-colour drift':<30} {max_d.mean():>8.3f} {np.median(max_d):>8.3f} "
+              f"{max_d.std():>8.3f} {max_d.min():>8.3f} {max_d.max():>8.3f}")
+        print(f"  {'Mean per-colour drift':<30} {mean_d.mean():>8.3f} {np.median(mean_d):>8.3f} "
+              f"{mean_d.std():>8.3f} {mean_d.min():>8.3f} {mean_d.max():>8.3f}")
+ 
+        print(f"\n  Feasible runs: {n_feasible}/{args.runs} "
+              f"({100 * n_feasible / args.runs:.0f}%)")
+        print(f"  Best run fitness: {best_overall_score:.3f}")
+ 
+        # Show detailed report for the best run
+        print()
+        report_result(palette_lab, optimized_lab, cvd_types=args.cvd)
+ 
+    print("  Optimised palette (RGB hex) — best run:")
     for i, rgb in enumerate(optimized_rgb):
         hex_col = "#{:02x}{:02x}{:02x}".format(
             int(rgb[0]*255), int(rgb[1]*255), int(rgb[2]*255))
         print(f"    [{i}] {hex_col}")
  
     # ── Step 4: Visualise ─────────────────────────────────────
-    palette_save    = "palette_comparison.png" if args.save else None
-    convergence_save = "convergence.png"       if args.save else None
+    palette_save     = "palette_comparison.png" if args.save else None
+    convergence_save = "convergence.png"        if args.save else None
  
     print("\n  Showing visualizations...")
+ 
+    # Best palette comparison
     show_palette_comparison(
         palette_lab, optimized_lab,
         cvd_type=args.cvd,
         save_path=palette_save
     )
-    show_convergence(history, save_path=convergence_save)
+ 
+    # Convergence plot — multi-run overlay or single curve
+    if args.runs > 1:
+        _show_convergence_multi(all_histories, save_path=convergence_save)
+    else:
+        show_convergence(best_overall_history, save_path=convergence_save)
  
     print("  Done!\n")
+ 
+ 
+def _show_convergence_multi(all_histories, save_path=None):
+    """Plot all convergence curves overlaid with mean ± std."""
+    import matplotlib.pyplot as plt
+ 
+    fig, ax = plt.subplots(figsize=(8, 4))
+ 
+    # Each run in light grey
+    for history in all_histories:
+        ax.plot(history, color="#AAAAAA", linewidth=0.8, alpha=0.5)
+ 
+    # Mean + std band
+    max_len = max(len(h) for h in all_histories)
+    padded = np.array([
+        h + [h[-1]] * (max_len - len(h)) for h in all_histories
+    ])
+    mean_curve = padded.mean(axis=0)
+    std_curve = padded.std(axis=0)
+ 
+    ax.plot(mean_curve, color="#4C72B0", linewidth=2.5, label="Mean")
+    ax.fill_between(range(max_len),
+                    mean_curve - std_curve,
+                    mean_curve + std_curve,
+                    alpha=0.15, color="#4C72B0", label="±1 Std Dev")
+ 
+    ax.set_xlabel("Generation", fontsize=12)
+    ax.set_ylabel("Best Fitness (min ΔE)", fontsize=12)
+    ax.set_title(f"GA Convergence — {len(all_histories)} Independent Runs",
+                 fontsize=13)
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+    plt.tight_layout()
+ 
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+    else:
+        plt.show()
  
  
 if __name__ == "__main__":

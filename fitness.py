@@ -29,7 +29,7 @@ from cvd_module import simulate_palette_lab, delta_e
 # ---------------------------------------------------------------------------
 # Configuration defaults
 # ---------------------------------------------------------------------------
-DEFAULT_TAU = 15.0        # max ΔE drift allowed per color (fidelity threshold)
+DEFAULT_TAU = 12.0        # max ΔE drift allowed per color (fidelity threshold)
 PENALTY_WEIGHT = 50.0     # penalty per unit of constraint violation
 DEFAULT_CVD_TYPES = ["protan", "deutan", "tritan"]
 
